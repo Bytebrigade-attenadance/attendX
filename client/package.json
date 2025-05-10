@@ -21,6 +21,7 @@
     "axios": "^1.9.0",
     "dayjs": "^1.11.13",
     "dotenv": "^16.5.0",
+    "eas-cli": "^16.4.1",
     "expo": "53.0.9",
     "expo-blur": "~14.1.4",
     "expo-constants": "~17.1.6",
