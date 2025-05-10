@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
 import validateLocation from "../utils/checkLocation.js";
+import { sendPushNotification } from "../utils/sendNotification.js";
 
 const startSession = async (req, res) => {
   const {
@@ -135,6 +136,15 @@ const startSession = async (req, res) => {
     });
 
     console.log(attendance);
+
+    const data = { attendanceId: attendance.id };
+
+    sendPushNotification(
+      fcmTokens,
+      "Kindly Mark your attendance",
+      "Click this notification to mark your attendance",
+      data
+    );
 
     await fs.writeFile(filePath, JSON.stringify(records, null, 2));
     console.log("Attendance record updated successfully");
