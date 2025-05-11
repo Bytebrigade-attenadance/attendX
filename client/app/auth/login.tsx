@@ -88,6 +88,7 @@ export default function LoginScreen() {
           });
         }
       } catch (error: any) {
+        console.log(error.response)
         Toast.show(error.response.data.message, {
           type: "danger",
           placement: "top",
