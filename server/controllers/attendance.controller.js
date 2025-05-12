@@ -86,12 +86,6 @@ const startSession = async (req, res) => {
       },
     });
 
-    const fcmTokens = students
-      .map((student) => student.user.fcmToken)
-      .filter((token) => token !== null && token !== undefined);
-
-    console.log(fcmTokens);
-
     const sessionStart = new Date();
     const sessionEnd = new Date(sessionStart.getTime() + 3 * 60 * 1000); // 3 minutes later
 
@@ -138,13 +132,6 @@ const startSession = async (req, res) => {
     console.log(attendance);
 
     const data = { attendanceId: attendance.id };
-
-    sendPushNotification(
-      fcmTokens,
-      "Kindly Mark your attendance",
-      "Click this notification to mark your attendance",
-      data
-    );
 
     await fs.writeFile(filePath, JSON.stringify(records, null, 2));
     console.log("Attendance record updated successfully");
@@ -390,6 +377,102 @@ const storeRecords = async (req, res) => {
   }
 };
 
+const getActiveattendance = async (req, res) => {
+  const { token } = req.body;
+
+  try {
+    if (!token) {
+      throw new ApiError(400, "Invalid login");
+    }
+
+    const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
+    const studentId = decodedToken.userId;
+
+    if (!studentId) {
+      throw new ApiError(400, "Wrong token provided");
+    }
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const filePath = path.resolve(__dirname, "../records.temp.json");
+
+    const rawData = await fs.readFile(filePath, "utf-8");
+    const records = rawData ? JSON.parse(rawData) : [];
+
+    // Find the attendance record where the student is present
+    const matchingRecord = records.find((record) =>
+      Object.keys(record.studentRecords).includes(studentId)
+    );
+
+    if (!matchingRecord) {
+      return res
+        .status(404)
+        .json(new ApiResponse(404, null, "No active attendance session found"));
+    }
+
+    const attendanceId = matchingRecord.attendanceId;
+
+    const attendance = await prisma.attendance.findUnique({
+      where: {
+        id: attendanceId,
+      },
+      select: {
+        class: {
+          select: {
+            branch: true,
+            semester: true,
+          },
+        },
+        subject: {
+          select: {
+            name: true,
+          },
+        },
+        teacher: {
+          select: {
+            user: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!attendance) {
+      return res
+        .status(404)
+        .json(new ApiResponse(404, null, "Attendance record not found"));
+    }
+
+    // Extract necessary details
+    const responseData = {
+      attendanceId: attendanceId,
+      teacherName: attendance.teacher.user.name,
+      branch: attendance.class.branch,
+      semester: attendance.class.semester,
+      subjectName: attendance.subject.name,
+    };
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, responseData, "Active attendance session info")
+      );
+  } catch (error) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, null, error.message || "An error occurred"));
+  }
+};
+
 // TODO: Update records to be added
 
-export { startSession, getMarked, storeRecords, endSession };
+export {
+  startSession,
+  getMarked,
+  storeRecords,
+  endSession,
+  getActiveattendance,
+};
