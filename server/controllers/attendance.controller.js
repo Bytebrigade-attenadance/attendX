@@ -337,6 +337,114 @@ const storeRecords = async (req, res) => {
   }
 };
 
+// const getActiveattendance = async (req, res) => {
+//   const { token } = req.body;
+
+//   try {
+//     if (!token) {
+//       throw new ApiError(400, "Invalid login");
+//     }
+
+//     const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
+//     const studentId = decodedToken.userId;
+
+//     if (!studentId) {
+//       throw new ApiError(400, "Wrong token provided");
+//     }
+
+//     const __filename = fileURLToPath(import.meta.url);
+//     const __dirname = path.dirname(__filename);
+//     const filePath = path.resolve(__dirname, "../records.temp.json");
+
+//     const rawData = await fs.readFile(filePath, "utf-8");
+//     const records = rawData ? JSON.parse(rawData) : [];
+
+//     // Find the attendance record where the student is present
+//     const matchingRecord = records.find((record) =>
+//       Object.keys(record.studentRecords).includes(studentId)
+//     );
+
+//     if (!matchingRecord) {
+//       return res
+//         .status(404)
+//         .json(new ApiResponse(404, null, "No active attendance session found"));
+//     }
+
+//     const attendanceId = matchingRecord.attendanceId;
+
+//     const attendance = await prisma.attendance.findUnique({
+//       where: {
+//         id: attendanceId,
+//       },
+//       select: {
+//         session_end: true,
+//         class: {
+//           select: {
+//             branch: true,
+//             semester: true,
+//           },
+//         },
+//         subject: {
+//           select: {
+//             name: true,
+//           },
+//         },
+//         teacher: {
+//           select: {
+//             user: {
+//               select: {
+//                 name: true,
+//               },
+//             },
+//           },
+//         },
+//       },
+//     });
+
+//     if (!attendance) {
+//       return res
+//         .status(404)
+//         .json(new ApiResponse(404, null, "Attendance record not found"));
+//     }
+
+//     const options = {
+//       year: "numeric",
+//       month: "long",
+//       day: "numeric",
+//       hour: "2-digit",
+//       minute: "2-digit",
+//       second: "2-digit",
+//       timeZoneName: "short",
+//     };
+
+//     const endTime = new Date(attendance.session_end).toLocaleString(
+//       "en-IN",
+//       options
+//     );
+//     console.log(formatted);
+
+//     // Extract necessary details
+//     const responseData = {
+//       attendanceId: attendanceId,
+//       teacherName: attendance.teacher.user.name,
+//       branch: attendance.class.branch,
+//       semester: attendance.class.semester,
+//       subjectName: attendance.subject.name,
+//       endsAt: endTime,
+//     };
+
+//     return res
+//       .status(200)
+//       .json(
+//         new ApiResponse(200, responseData, "Active attendance session info")
+//       );
+//   } catch (error) {
+//     return res
+//       .status(400)
+//       .json(new ApiResponse(400, null, error.message || "An error occurred"));
+//   }
+// };
+
 const getActiveattendance = async (req, res) => {
   const { token } = req.body;
 
@@ -345,6 +453,7 @@ const getActiveattendance = async (req, res) => {
       throw new ApiError(400, "Invalid login");
     }
 
+    // Decode the token and get the studentId
     const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
     const studentId = decodedToken.userId;
 
@@ -352,31 +461,22 @@ const getActiveattendance = async (req, res) => {
       throw new ApiError(400, "Wrong token provided");
     }
 
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const filePath = path.resolve(__dirname, "../records.temp.json");
+    // Get the current time
+    const currentTime = new Date();
 
-    const rawData = await fs.readFile(filePath, "utf-8");
-    const records = rawData ? JSON.parse(rawData) : [];
-
-    // Find the attendance record where the student is present
-    const matchingRecord = records.find((record) =>
-      Object.keys(record.studentRecords).includes(studentId)
-    );
-
-    if (!matchingRecord) {
-      return res
-        .status(404)
-        .json(new ApiResponse(404, null, "No active attendance session found"));
-    }
-
-    const attendanceId = matchingRecord.attendanceId;
-
-    const attendance = await prisma.attendance.findUnique({
+    // Find the active attendance record for the student where the session has not ended
+    const attendance = await prisma.attendance.findFirst({
       where: {
-        id: attendanceId,
+        student_records: {
+          path: [studentId],
+          equals: { status: "present" },
+        },
+        // session_end: {
+        //   gt: currentTime, // The session should not have ended yet
+        // },
       },
       select: {
+        id: true,
         session_end: true,
         class: {
           select: {
@@ -404,9 +504,10 @@ const getActiveattendance = async (req, res) => {
     if (!attendance) {
       return res
         .status(404)
-        .json(new ApiResponse(404, null, "Attendance record not found"));
+        .json(new ApiResponse(404, null, "No active attendance session found"));
     }
 
+    // Format session_end date
     const options = {
       year: "numeric",
       month: "long",
@@ -421,11 +522,10 @@ const getActiveattendance = async (req, res) => {
       "en-IN",
       options
     );
-    console.log(formatted);
 
-    // Extract necessary details
+    // Prepare response data
     const responseData = {
-      attendanceId: attendanceId,
+      attendanceId: attendance.id,
       teacherName: attendance.teacher.user.name,
       branch: attendance.class.branch,
       semester: attendance.class.semester,
