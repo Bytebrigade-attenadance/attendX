@@ -174,26 +174,24 @@ const getMarked = async (req, res) => {
       throw new ApiError(400, "User not found");
     }
 
-    // Read records from file
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const filePath = path.resolve(__dirname, "../records.temp.json");
-    const rawData = await fs.readFile(filePath, "utf-8");
-    const records = rawData ? JSON.parse(rawData) : [];
+    // Fetch attendance record from DB
+    const attendance = await prisma.attendance.findUnique({
+      where: { id: attendanceId },
+      select: {
+        teacherLatitude: true,
+        teacherLongitude: true,
+        student_records: true,
+      },
+    });
 
-    // Find the correct attendance record
-    const attendanceRecord = records.find(
-      (record) => record.attendanceId === attendanceId
-    );
-
-    if (!attendanceRecord) {
+    if (!attendance) {
       throw new ApiError(404, "Attendance record not found");
     }
 
-    // Validate student's location
+    // Validate location
     const isPresentInRadius = validateLocation(
-      parseFloat(attendanceRecord.teacherLatitude),
-      parseFloat(attendanceRecord.teacherLongitude),
+      parseFloat(attendance.teacherLatitude),
+      parseFloat(attendance.teacherLongitude),
       parseFloat(studentLat),
       parseFloat(studentLon),
       20
@@ -205,19 +203,20 @@ const getMarked = async (req, res) => {
       });
     }
 
-    // Check if student exists in studentRecords and update status
-    if (
-      attendanceRecord.studentRecords &&
-      attendanceRecord.studentRecords[selectedUser]
-    ) {
-      attendanceRecord.studentRecords[selectedUser].status = "present";
-    } else {
-      // Optional: Add the student if not already in record
-      attendanceRecord.studentRecords[selectedUser] = { status: "present" };
-    }
+    // Prepare updated student_records
+    const updatedRecords = {
+      ...attendance.student_records,
+      [selectedUser]: { status: "present" },
+    };
 
-    // Write updated data back to the file
-    await fs.writeFile(filePath, JSON.stringify(records, null, 2));
+    // Update attendance in DB
+    await prisma.attendance.update({
+      where: { id: attendanceId },
+      data: {
+        student_records: updatedRecords,
+      },
+    });
+
     console.log("Attendance updated for student", selectedUser);
 
     return res.status(200).json({ message: "Marked present successfully" });
@@ -228,151 +227,112 @@ const getMarked = async (req, res) => {
 };
 
 const endSession = async (req, res) => {
-  const { token } = req.body;
-  if (!token) {
-    throw new ApiError(400, "Invalid login");
-  }
-
-  const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
-  const teacherId = decodedToken.userId;
-
-  if (!teacherId) {
-    throw new ApiError(400, "Wrong token provided");
-  }
-
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const filePath = path.resolve(__dirname, "../records.temp.json");
-  const rawData = await fs.readFile(filePath, "utf-8");
-  const records = rawData ? JSON.parse(rawData) : [];
-
-  const attendanceRecord = records.find(
-    (record) => record.teacherId === teacherId
-  );
-
-  if (!attendanceRecord) {
-    throw new ApiError(404, "Attendance record not found");
-  }
-
-  const response = attendanceRecord.studentRecords;
-
-  const studentIds = Object.keys(attendanceRecord.studentRecords);
-  // console.log(studentIds);
-  // const studentsWithNames = await prisma.student.findMany({
-  //   where: {
-  //     id: {
-  //       in: studentIds,
-  //     },
-  //   },
-  //   include: {
-  //     user: {
-  //       select: {
-  //         name: true,
-  //       },
-  //     },
-  //   },
-  // });
-
-  // const namesList = studentsWithNames.map((student) => ({
-  //   id: student.id,
-  //   name: student.user.name,
-  // }));
-
-  // const combinedList = namesList.map((student) => ({
-  //   id: student.id,
-  //   name: student.name,
-  //   status: response[student.id]?.status || "absent", // default to 'absent' if missing
-  // }));
-
-  const studentsWithStatus = await prisma.student.findMany({
-    where: {
-      id: {
-        in: studentIds,
-      },
-    },
-    select: {
-      id: true,
-      user: {
-        select: {
-          name: true,
-        },
-      },
-    },
-  });
-
-  const combinedList = studentsWithStatus.map((student) => ({
-    id: student.id,
-    name: student.user.name,
-    status: response[student.id]?.status || "absent",
-  }));
-
-  // console.log(combinedList);
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        { combinedList, attendanceId: attendanceRecord.attendanceId },
-        "Records sent successfully"
-      )
-    );
-};
-
-const storeRecords = async (req, res) => {
   try {
-    const { attendanceRecords, attendanceId } = req.body;
-
-    if (!attendanceRecords || !attendanceId) {
-      throw new ApiError(400, "attendanceRecords or attendanceId missing");
-    }
-    console.log(attendanceRecords);
-    console.log(attendanceId);
-    // Convert to studentRecords format
-    const studentRecords = {};
-    for (const record of attendanceRecords) {
-      studentRecords[record.id] = {
-        status: record.status,
-      };
+    const { token } = req.body;
+    if (!token) {
+      throw new ApiError(400, "Invalid login");
     }
 
-    // Load the JSON file
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const filePath = path.resolve(__dirname, "../records.temp.json");
+    const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
+    const teacherId = decodedToken.userId;
 
-    const rawData = await fs.readFile(filePath, "utf-8");
-    const records = rawData ? JSON.parse(rawData) : [];
+    if (!teacherId) {
+      throw new ApiError(400, "Wrong token provided");
+    }
 
-    const attendance = await prisma.attendance.update({
-      where: {
-        id: attendanceId, // Match based on the attendanceId
-      },
-      data: {
-        student_records: studentRecords, // Update student_records
+    // Get the latest attendance session for this teacher
+    const attendanceRecord = await prisma.attendance.findFirst({
+      where: { teacher_id: teacherId },
+      orderBy: { created_at: "desc" }, // optional: choose the latest session
+      select: {
+        id: true,
+        student_records: true,
       },
     });
 
-    const updatedRecords = records.filter(
-      (record) => record.attendanceId !== attendanceId
-    );
+    if (!attendanceRecord) {
+      throw new ApiError(404, "Attendance record not found");
+    }
 
-    await fs.writeFile(
-      filePath,
-      JSON.stringify(updatedRecords, null, 2),
-      "utf-8"
-    );
+    const studentRecords = attendanceRecord.student_records || {};
+    const studentIds = Object.keys(studentRecords);
+
+    const studentsWithStatus = await prisma.student.findMany({
+      where: {
+        id: {
+          in: studentIds,
+        },
+      },
+      select: {
+        id: true,
+        user: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+
+    const combinedList = studentsWithStatus.map((student) => ({
+      id: student.id,
+      name: student.user.name,
+      status: studentRecords[student.id]?.status || "absent",
+    }));
 
     return res
       .status(200)
       .json(
         new ApiResponse(
           200,
-          attendance,
+          { combinedList, attendanceId: attendanceRecord.id },
+          "Records sent successfully"
+        )
+      );
+  } catch (error) {
+    console.error("Error in endSession:", error.message);
+    return res.status(400).json({ error: error.message });
+  }
+};
+
+const storeRecords = async (req, res) => {
+  try {
+    const { attendanceRecords, attendanceId } = req.body;
+
+    // Check for required fields
+    if (!attendanceRecords || !attendanceId) {
+      throw new ApiError(400, "attendanceRecords or attendanceId missing");
+    }
+
+    // Convert to studentRecords format (ID: {status})
+    const studentRecords = {};
+    for (const record of attendanceRecords) {
+      studentRecords[record.id] = {
+        status: record.status, // mark each student as present/absent
+      };
+    }
+
+    // Update the attendance record in the database with the new student records
+    const updatedAttendance = await prisma.attendance.update({
+      where: {
+        id: attendanceId, // Match attendance by ID
+      },
+      data: {
+        student_records: studentRecords, // Update the student_records JSON field
+      },
+    });
+
+    // Send response with updated attendance
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          updatedAttendance,
           "Attendance records updated successfully"
         )
       );
   } catch (err) {
-    console.error(err);
+    console.error("Error updating attendance:", err);
     return res.status(500).json(new ApiError(500, "Internal Server Error"));
   }
 };

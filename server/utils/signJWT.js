@@ -14,4 +14,4 @@ const signJwtToken = (userId) => {
   console.log(token);
 };
 
-signJwtToken("8c2358b4-36a1-4c37-a8e4-cb98c4ff4c02");
+signJwtToken("bfb46ff6-9037-4c0a-8ecb-d1ba6f63d507");
