@@ -8,13 +8,20 @@ import {
 
 import prisma from "../db/db.config.js";
 
-/**
- * Seed minimal test data for the attendance management system
- */
 async function seedMinimalData() {
   console.log("🌱 Starting minimal database seeding for testing...");
 
   try {
+    // Clear existing data
+    await prisma.attendance.deleteMany();
+    await prisma.teacherClass.deleteMany();
+    await prisma.classSubject.deleteMany();
+    await prisma.student.deleteMany();
+    await prisma.teacher.deleteMany();
+    await prisma.subject.deleteMany();
+    await prisma.class.deleteMany();
+    await prisma.user.deleteMany();
+
     // 1. Create one subject
     const subject = await prisma.subject.create({
       data: {
@@ -22,26 +29,31 @@ async function seedMinimalData() {
         name: "Introduction to Computer Science",
       },
     });
-    console.log("✓ Created subject:", subject.name);
 
-    // 2. Create one class
-    const classObj = await prisma.class.create({
+    // 2. Create two classes
+    const class1 = await prisma.class.create({
       data: {
         code: "CSE-1",
         branch: Department.CSE,
         semester: Semester.I,
       },
     });
-    console.log("✓ Created class:", classObj.code);
 
-    // 3. Connect subject to class
+    const class2 = await prisma.class.create({
+      data: {
+        code: "CSE-2",
+        branch: Department.CSE,
+        semester: Semester.I,
+      },
+    });
+
+    // 3. Connect subject to class1 only (for attendance)
     await prisma.classSubject.create({
       data: {
-        class_id: classObj.id,
+        class_id: class1.id,
         subject_id: subject.id,
       },
     });
-    console.log("✓ Connected subject to class");
 
     // 4. Create admin user
     const admin = await prisma.user.create({
@@ -53,9 +65,8 @@ async function seedMinimalData() {
         gender: Gender.other,
       },
     });
-    console.log("✓ Created admin user:", admin.email);
 
-    // 5. Create one teacher
+    // 5. Create teacher and link
     const teacherUser = await prisma.user.create({
       data: {
         name: "Test Teacher",
@@ -72,19 +83,16 @@ async function seedMinimalData() {
         teacher_id_no: "T001",
       },
     });
-    console.log("✓ Created teacher:", teacherUser.name);
 
-    // 6. Assign teacher to class and subject
     await prisma.teacherClass.create({
       data: {
         teacher_id: teacher.id,
-        class_id: classObj.id,
+        class_id: class1.id,
         subject_id: subject.id,
       },
     });
-    console.log("✓ Assigned teacher to class and subject");
 
-    // 7. Create three students
+    // 6. Create students
     const students = [];
 
     for (let i = 1; i <= 3; i++) {
@@ -98,50 +106,51 @@ async function seedMinimalData() {
         },
       });
 
+      const assignedClass = i === 2 ? class2 : class1; // Student 2 → class2; rest → class1
+
       const student = await prisma.student.create({
         data: {
           id: studentUser.id,
-          class_id: classObj.id,
+          class_id: assignedClass.id,
           year: 1,
           reg_no: `CSE${1000 + i}`,
         },
       });
 
-      students.push({ ...student, user: studentUser });
+      students.push({
+        ...student,
+        user: studentUser,
+        class_id: assignedClass.id,
+      });
     }
-    console.log("✓ Created 3 test students");
 
-    // 8. Create one attendance record
+    // 7. Create attendance only for class1 students
     const today = new Date();
-
-    // Create records for student attendance (using JSONB)
-    const studentRecords = students.map((student, index) => ({
-      student_id: student.id,
-      status: index === 0 ? AttendanceStatus.absent : AttendanceStatus.present, // First student absent, rest present
-    }));
+    const class1StudentRecords = students
+      .filter((s) => s.class_id === class1.id)
+      .map((student, index) => ({
+        student_id: student.id,
+        status:
+          index === 0 ? AttendanceStatus.absent : AttendanceStatus.present,
+      }));
 
     const attendance = await prisma.attendance.create({
       data: {
-        class_id: classObj.id,
+        class_id: class1.id,
         subject_id: subject.id,
         teacher_id: teacher.id,
         date: today,
-        session_start: new Date(today.setHours(9, 0, 0)), // 9:00 AM
-        session_end: new Date(today.setHours(10, 0, 0)), // 10:00 AM
-        student_records: studentRecords,
+        session_start: new Date(today.setHours(9, 0, 0)),
+        session_end: new Date(today.setHours(10, 0, 0)),
+        student_records: class1StudentRecords,
       },
     });
-    console.log(
-      "✓ Created attendance record with",
-      studentRecords.length,
-      "student records"
-    );
 
-    // Return created data for reference
+    // Return created data
     return {
       admin,
       teacher: { ...teacher, user: teacherUser },
-      class: classObj,
+      classes: [class1, class2],
       subject,
       students,
       attendance,
@@ -156,14 +165,12 @@ async function seedMinimalData() {
 seedMinimalData()
   .then((data) => {
     console.log("✅ Database seeding completed successfully!");
-    console.log("Summary of created data:");
     console.log(`- Admin: ${data.admin.email}`);
     console.log(
       `- Teacher: ${data.teacher.user.name} (${data.teacher.teacher_id_no})`
     );
-    console.log(
-      `- Class: ${data.class.code} (${data.class.branch} - ${data.class.semester})`
-    );
+    console.log(`- Class 1: ${data.classes[0].code}`);
+    console.log(`- Class 2: ${data.classes[1].code}`);
     console.log(`- Subject: ${data.subject.name} (${data.subject.code})`);
     console.log(`- Students: ${data.students.length}`);
     console.log(`- Attendance Records: 1`);
