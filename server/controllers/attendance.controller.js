@@ -417,6 +417,7 @@ const getActiveattendance = async (req, res) => {
         id: attendanceId,
       },
       select: {
+        session_end: true,
         class: {
           select: {
             branch: true,
@@ -446,6 +447,22 @@ const getActiveattendance = async (req, res) => {
         .json(new ApiResponse(404, null, "Attendance record not found"));
     }
 
+    const options = {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short",
+    };
+
+    const endTime = new Date(attendance.session_end).toLocaleString(
+      "en-IN",
+      options
+    );
+    console.log(formatted);
+
     // Extract necessary details
     const responseData = {
       attendanceId: attendanceId,
@@ -453,6 +470,7 @@ const getActiveattendance = async (req, res) => {
       branch: attendance.class.branch,
       semester: attendance.class.semester,
       subjectName: attendance.subject.name,
+      endsAt: endTime,
     };
 
     return res
